@@ -1,0 +1,388 @@
+---
+import PdfPreview from './PdfPreview.astro';
+import '../styles/pdf-upload.css';
+---
+
+<main class="pdf-upload">
+  <div id="upload-stage">
+    <section class="intro" aria-labelledby="upload-heading">
+      <p class="eyebrow">Chip - Potatohead's DnD Character Sheet</p>
+      <h2 id="upload-heading">Bring your character sheet from DnDBeyond</h2>
+      <p class="description">
+        Drop a PDF here to get started, or choose one from your device.
+      </p>
+    </section>
+
+    <section class="upload-card" aria-label="Upload a PDF character sheet">
+      <div class="drop-zone" id="drop-zone">
+        <div class="file-icon" aria-hidden="true">
+          <svg viewBox="0 0 48 48" fill="none">
+            <path d="M13 5.5h14l9 9v27H13v-36Z" />
+            <path d="M27 5.5v10h9M19 27h11M19 33h11" />
+            <path d="M8 12.5v31h23" />
+          </svg>
+        </div>
+        <h3>Drop your PDF here</h3>
+        <span class="divider"><span>or</span></span>
+        <button class="choose-button" id="choose-file" type="button">
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path d="M10 13V3m0 0L6 7m4-4 4 4M4 12v4h12v-4" />
+          </svg>
+          Choose a PDF
+        </button>
+        <input
+          id="pdf-input"
+          type="file"
+          accept=".pdf,application/pdf"
+          tabindex="-1"
+          aria-label="Choose a PDF file"
+          aria-hidden="true"
+        />
+      </div>
+      <p class="file-status" id="file-status" role="status" aria-live="polite">
+        No file selected yet
+      </p>
+    </section>
+    <p class="privacy-note">
+      Your file doesn't leave this device.
+    </p>
+  </div>
+
+  <div id="preview-stage" hidden>
+    <PdfPreview />
+  </div>
+</main>
+
+<script>
+  import * as pdfjsLib from 'pdfjs-dist';
+  import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+
+  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+
+  const dropZone = document.querySelector('#drop-zone');
+  const fileInput = document.querySelector('#pdf-input');
+  const chooseButton = document.querySelector('#choose-file');
+  const fileStatus = document.querySelector('#file-status');
+  const uploadStage = document.querySelector('#upload-stage');
+  const previewStage = document.querySelector('#preview-stage');
+  const previewSummary = document.querySelector('#pdf-preview-summary');
+  const previewTables = document.querySelector('#pdf-tables');
+
+  if (
+    dropZone instanceof HTMLElement &&
+    fileInput instanceof HTMLInputElement &&
+    chooseButton instanceof HTMLButtonElement &&
+    fileStatus instanceof HTMLElement &&
+    uploadStage instanceof HTMLElement &&
+    previewStage instanceof HTMLElement &&
+    previewSummary instanceof HTMLElement &&
+    previewTables instanceof HTMLElement
+  ) {
+    let currentRequest = 0;
+
+    type ExtractedTable = {
+      title: string;
+      columns: string[];
+      rows: string[][];
+    };
+
+    const normalizeFieldName = (name: string) =>
+      name.replace(/\s+/g, '').toLowerCase();
+
+    const getField = (fields: Map<string, string>, ...names: string[]) => {
+      for (const name of names) {
+        const value = fields.get(normalizeFieldName(name));
+        if (value) return value;
+      }
+      return '';
+    };
+
+    const buildTables = (fields: Map<string, string>): ExtractedTable[] => {
+      const tables: ExtractedTable[] = [];
+      const addTable = (title: string, columns: string[], rows: string[][]) => {
+        const nonemptyRows = rows.filter((row) => row.some((cell) => cell.trim()));
+        if (nonemptyRows.length) tables.push({ title, columns, rows: nonemptyRows });
+      };
+
+      const characterFields: [string, string[]][] = [
+        ['Character name', ['CharacterName']],
+        ['Class & level', ['CLASS LEVEL']],
+        ['Player name', ['PLAYER NAME']],
+        ['Species', ['RACE']],
+        ['Background', ['BACKGROUND']],
+        ['Experience', ['EXPERIENCE POINTS']],
+        ['Armor class', ['AC']],
+        ['Initiative', ['Init']],
+        ['Speed', ['Speed']],
+        ['Maximum hit points', ['MaxHP']],
+      ];
+      addTable(
+        'Character',
+        ['Field', 'Value'],
+        characterFields.map(([label, names]) => [label, getField(fields, ...names)]),
+      );
+
+      const abilities = [
+        ['Strength', 'STR', 'STRmod'],
+        ['Dexterity', 'DEX', 'DEXmod'],
+        ['Constitution', 'CON', 'CONmod'],
+        ['Intelligence', 'INT', 'INTmod'],
+        ['Wisdom', 'WIS', 'WISmod'],
+        ['Charisma', 'CHA', 'CHamod'],
+      ];
+      addTable(
+        'Ability scores',
+        ['Ability', 'Score', 'Modifier'],
+        abilities.map(([label, score, modifier]) => [
+          label,
+          getField(fields, score),
+          getField(fields, modifier),
+        ]),
+      );
+
+      const skills = [
+        ['Acrobatics', 'Acrobatics', 'AcrobaticsMod'],
+        ['Animal Handling', 'Animal', 'AnimalMod'],
+        ['Arcana', 'Arcana', 'ArcanaMod'],
+        ['Athletics', 'Athletics', 'AthleticsMod'],
+        ['Deception', 'Deception', 'DeceptionMod'],
+        ['History', 'History', 'HistoryMod'],
+        ['Insight', 'Insight', 'InsightMod'],
+        ['Intimidation', 'Intimidation', 'IntimidationMod'],
+        ['Investigation', 'Investigation', 'InvestigationMod'],
+        ['Medicine', 'Medicine', 'MedicineMod'],
+        ['Nature', 'Nature', 'NatureMod'],
+        ['Perception', 'Perception', 'PerceptionMod'],
+        ['Performance', 'Performance', 'PerformanceMod'],
+        ['Persuasion', 'Persuasion', 'PersuasionMod'],
+        ['Religion', 'Religion', 'ReligionMod'],
+        ['Sleight of Hand', 'SleightofHand', 'SleightofHandMod'],
+        ['Stealth', 'Stealth', 'StealthMod'],
+        ['Survival', 'Survival', 'SurvivalMod'],
+      ];
+      addTable(
+        'Skills',
+        ['Skill', 'Modifier', 'Ability', 'Proficiency'],
+        skills.map(([label, valueName, abilityName]) => {
+          const proficiency = getField(fields, `${valueName}Prof`);
+          return [
+            label,
+            getField(fields, valueName),
+            getField(fields, abilityName),
+            proficiency === 'E'
+              ? 'Expertise'
+              : proficiency === 'P'
+                ? 'Proficient'
+                : '',
+          ];
+        }),
+      );
+
+      const attacks: string[][] = [];
+      for (let index = 1; index <= 20; index += 1) {
+        const name = getField(fields, index === 1 ? 'Wpn Name' : `Wpn Name ${index}`);
+        if (!name) continue;
+        attacks.push([
+          name,
+          getField(fields, `Wpn${index} AtkBonus`),
+          getField(fields, `Wpn${index} Damage`),
+          getField(fields, `Wpn Notes ${index}`),
+        ]);
+      }
+      addTable('Attacks', ['Name', 'Attack bonus', 'Damage', 'Notes'], attacks);
+
+      const equipment: string[][] = [];
+      for (let index = 0; index < 100; index += 1) {
+        const name = getField(fields, `Eq Name${index}`);
+        if (!name) continue;
+        equipment.push([
+          name,
+          getField(fields, `Eq Qty${index}`),
+          getField(fields, `Eq Weight${index}`),
+        ]);
+      }
+      addTable('Inventory', ['Item', 'Quantity', 'Weight'], equipment);
+
+      const currencies = ['CP', 'SP', 'EP', 'GP', 'PP'].map((name) => [
+        name,
+        getField(fields, name),
+      ]);
+      addTable('Currency', ['Coin', 'Amount'], currencies);
+
+      const attunedItems: string[][] = [];
+      for (let index = 1; index <= 20; index += 1) {
+        const name = getField(fields, `Attuned Name${index}`);
+        if (!name) continue;
+        attunedItems.push([
+          name,
+          getField(fields, `Attuned Qty${index}`),
+          getField(fields, `Attuned Weight${index}`),
+        ]);
+      }
+      addTable('Attuned items', ['Item', 'Quantity', 'Weight'], attunedItems);
+
+      const spells: string[][] = [];
+      for (let index = 0; index < 200; index += 1) {
+        const name = getField(fields, `spellName${index}`);
+        if (!name) continue;
+        spells.push([
+          name,
+          getField(fields, `spellSource${index}`),
+          getField(fields, `spellCastingTime${index}`),
+          getField(fields, `spellRange${index}`),
+          getField(fields, `spellComponents${index}`),
+          getField(fields, `spellDuration${index}`),
+          getField(fields, `spellSaveHit${index}`),
+          getField(fields, `spellPrepared${index}`),
+          getField(fields, `spellPage${index}`),
+          getField(fields, `spellNotes${index}`),
+        ]);
+      }
+      addTable(
+        'Spells',
+        [
+          'Spell',
+          'Source',
+          'Casting time',
+          'Range',
+          'Components',
+          'Duration',
+          'Save / attack',
+          'Prepared',
+          'Page',
+          'Notes',
+        ],
+        spells,
+      );
+
+      return tables;
+    };
+
+    const renderTables = (tables: ExtractedTable[]) => {
+      previewTables.replaceChildren();
+
+      for (const tableData of tables) {
+        const section = document.createElement('section');
+        section.className = 'pdf-preview__table-section';
+
+        const heading = document.createElement('h3');
+        heading.textContent = tableData.title;
+
+        const scrollContainer = document.createElement('div');
+        scrollContainer.className = 'pdf-preview__table-scroll';
+
+        const table = document.createElement('table');
+        const head = table.createTHead().insertRow();
+        for (const column of tableData.columns) {
+          const cell = document.createElement('th');
+          cell.scope = 'col';
+          cell.textContent = column;
+          head.append(cell);
+        }
+
+        const body = table.createTBody();
+        for (const rowData of tableData.rows) {
+          const row = body.insertRow();
+          for (const value of rowData) {
+            const cell = row.insertCell();
+            cell.textContent = value;
+          }
+        }
+
+        scrollContainer.append(table);
+        section.append(heading, scrollContainer);
+        previewTables.append(section);
+      }
+    };
+
+    const showFile = async (file: File) => {
+      const request = ++currentRequest;
+
+      if (!file.name.toLowerCase().endsWith('.pdf')) {
+        fileStatus.textContent = 'That file is not a PDF. Please choose a PDF file.';
+        fileStatus.classList.add('error');
+        return;
+      }
+
+      fileStatus.textContent = `Reading ${file.name}…`;
+      fileStatus.classList.remove('error');
+
+      let loadingTask: pdfjsLib.PDFDocumentLoadingTask | undefined;
+
+      try {
+        const data = new Uint8Array(await file.arrayBuffer());
+        loadingTask = pdfjsLib.getDocument({ data });
+        const pdf = await loadingTask.promise;
+        const fields = new Map<string, string>();
+        for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+          const page = await pdf.getPage(pageNumber);
+          const annotations = await page.getAnnotations();
+          for (const annotation of annotations) {
+            if (
+              'fieldName' in annotation &&
+              typeof annotation.fieldName === 'string' &&
+              'fieldValue' in annotation &&
+              typeof annotation.fieldValue === 'string' &&
+              annotation.fieldValue.trim()
+            ) {
+              const name = normalizeFieldName(annotation.fieldName);
+              if (!fields.has(name)) fields.set(name, annotation.fieldValue.trim());
+            }
+          }
+        }
+
+        if (request === currentRequest) {
+          const tables = buildTables(fields);
+          if (!tables.length) {
+            fileStatus.textContent =
+              'No filled character-sheet fields were found. This extractor supports fillable PDFs, not flattened or scanned sheets.';
+            fileStatus.classList.add('error');
+            return;
+          }
+
+          renderTables(tables);
+          previewSummary.textContent = `Extracted ${tables.length} table${tables.length === 1 ? '' : 's'} from ${file.name}.`;
+          uploadStage.hidden = true;
+          previewStage.hidden = false;
+        }
+      } catch (error) {
+        if (request === currentRequest) {
+          fileStatus.textContent =
+            'Could not read this PDF. It may be damaged or password-protected.';
+          fileStatus.classList.add('error');
+        }
+        console.error('Failed to parse uploaded PDF:', error);
+      } finally {
+        if (loadingTask) {
+          await loadingTask.destroy();
+        }
+      }
+    };
+
+    chooseButton.addEventListener('click', () => fileInput.click());
+
+    fileInput.addEventListener('change', () => {
+      const file = fileInput.files?.[0];
+      fileInput.value = '';
+      if (file) void showFile(file);
+    });
+
+    dropZone.addEventListener('dragover', (event) => {
+      event.preventDefault();
+      dropZone.classList.add('dragging');
+    });
+
+    dropZone.addEventListener('dragleave', (event) => {
+      if (!(event.relatedTarget instanceof Node) || !dropZone.contains(event.relatedTarget)) {
+        dropZone.classList.remove('dragging');
+      }
+    });
+
+    dropZone.addEventListener('drop', (event) => {
+      event.preventDefault();
+      dropZone.classList.remove('dragging');
+      const file = event.dataTransfer?.files[0];
+      if (file) void showFile(file);
+    });
+  }
+</script>
