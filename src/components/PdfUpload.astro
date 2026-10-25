@@ -84,149 +84,265 @@ import '../styles/pdf-upload.css';
       title: string;
       columns: string[];
       rows: string[][];
+      rowSpans?: number[][];
+      description?: string;
     };
 
     const normalizeFieldName = (name: string) =>
       name.replace(/\s+/g, '').toLowerCase();
 
-    const getField = (fields: Map<string, string>, ...names: string[]) => {
-      for (const name of names) {
-        const value = fields.get(normalizeFieldName(name));
-        if (value) return value;
-      }
-      return '';
-    };
+    const getField = (fields: Map<string, string>, ...names: string[]) =>
+      names
+        .map((name) => fields.get(normalizeFieldName(name)))
+        .find((value) => value) ?? '';
 
-    const buildTables = (fields: Map<string, string>): ExtractedTable[] => {
+    const buildTables = (
+      fields: Map<string, string>,
+      featureTraitFields: [string, string][],
+    ): ExtractedTable[] => {
       const tables: ExtractedTable[] = [];
       const addTable = (title: string, columns: string[], rows: string[][]) => {
         const nonemptyRows = rows.filter((row) => row.some((cell) => cell.trim()));
         if (nonemptyRows.length) tables.push({ title, columns, rows: nonemptyRows });
       };
+      const addTextSection = (
+        title: string,
+        description: string,
+        columns: string[] = [],
+        rows: string[][] = [],
+      ) => tables.push({ title, description, columns, rows });
+      const indexedRows = (
+        limit: number,
+        getName: (index: number) => string,
+        getValues: (index: number) => string[],
+      ) =>
+        Array.from({ length: limit }, (_, index) => {
+          const name = getName(index);
+          return name ? [name, ...getValues(index)] : null;
+        }).filter((row): row is string[] => row !== null);
 
-      const characterFields: [string, string[]][] = [
-        ['Character name', ['CharacterName']],
-        ['Class & level', ['CLASS LEVEL']],
-        ['Player name', ['PLAYER NAME']],
-        ['Species', ['RACE']],
-        ['Background', ['BACKGROUND']],
-        ['Experience', ['EXPERIENCE POINTS']],
-        ['Armor class', ['AC']],
-        ['Initiative', ['Init']],
-        ['Speed', ['Speed']],
-        ['Maximum hit points', ['MaxHP']],
-      ];
       addTable(
         'Character',
         ['Field', 'Value'],
-        characterFields.map(([label, names]) => [label, getField(fields, ...names)]),
+        [
+          ['Initiative', getField(fields, 'Init')],
+          ['Speed', getField(fields, 'Speed')],
+          ['Max hit points', getField(fields, 'MaxHP')],
+          [
+            'Proficiency bonus',
+            getField(fields, 'ProfBonus', 'Proficiency Bonus'),
+          ],
+        ],
       );
-
-      const abilities = [
-        ['Strength', 'STR', 'STRmod'],
-        ['Dexterity', 'DEX', 'DEXmod'],
-        ['Constitution', 'CON', 'CONmod'],
-        ['Intelligence', 'INT', 'INTmod'],
-        ['Wisdom', 'WIS', 'WISmod'],
-        ['Charisma', 'CHA', 'CHamod'],
+      const savingThrows: [string, string][] = [
+        ['Strength', 'STR'],
+        ['Dexterity', 'DEX'],
+        ['Constitution', 'CON'],
+        ['Intelligence', 'INT'],
+        ['Wisdom', 'WIS'],
+        ['Charisma', 'CHA'],
       ];
-      addTable(
-        'Ability scores',
-        ['Ability', 'Score', 'Modifier'],
-        abilities.map(([label, score, modifier]) => [
-          label,
-          getField(fields, score),
-          getField(fields, modifier),
-        ]),
-      );
-
-      const skills = [
-        ['Acrobatics', 'Acrobatics', 'AcrobaticsMod'],
-        ['Animal Handling', 'Animal', 'AnimalMod'],
-        ['Arcana', 'Arcana', 'ArcanaMod'],
-        ['Athletics', 'Athletics', 'AthleticsMod'],
-        ['Deception', 'Deception', 'DeceptionMod'],
-        ['History', 'History', 'HistoryMod'],
-        ['Insight', 'Insight', 'InsightMod'],
-        ['Intimidation', 'Intimidation', 'IntimidationMod'],
-        ['Investigation', 'Investigation', 'InvestigationMod'],
-        ['Medicine', 'Medicine', 'MedicineMod'],
-        ['Nature', 'Nature', 'NatureMod'],
-        ['Perception', 'Perception', 'PerceptionMod'],
-        ['Performance', 'Performance', 'PerformanceMod'],
-        ['Persuasion', 'Persuasion', 'PersuasionMod'],
-        ['Religion', 'Religion', 'ReligionMod'],
-        ['Sleight of Hand', 'SleightofHand', 'SleightofHandMod'],
-        ['Stealth', 'Stealth', 'StealthMod'],
-        ['Survival', 'Survival', 'SurvivalMod'],
+      const armorClass = getField(fields, 'AC');
+      const defensesEntry = getField(fields, 'Defenses');
+      const defensesDescription = [
+        armorClass && `Armor class: ${armorClass}`,
+        defensesEntry,
+      ]
+        .filter(Boolean)
+        .join('\n');
+      const savingThrowRows = savingThrows
+        .map(([ability, abbreviation]) => [
+          `${ability} saving throw`,
+          getField(
+            fields,
+            `ST ${ability}`,
+            `${ability} Save`,
+            `${abbreviation} Save`,
+          ),
+        ])
+        .filter((row) => row[1].trim());
+      if (defensesDescription || savingThrowRows.length) {
+        addTextSection(
+          'Defenses',
+          defensesDescription,
+          ['Saving throw', 'Value'],
+          savingThrowRows,
+        );
+      }
+      const sensesDescription = getField(fields, 'Senses');
+      const passiveSenses: [string, string, string][] = [
+        ['Passive Perception', 'PassivePerception', 'Perception'],
+        ['Passive Insight', 'PassiveInsight', 'Insight'],
+        ['Passive Investigation', 'PassiveInvestigation', 'Investigation'],
       ];
-      addTable(
-        'Skills',
-        ['Skill', 'Modifier', 'Ability', 'Proficiency'],
-        skills.map(([label, valueName, abilityName]) => {
-          const proficiency = getField(fields, `${valueName}Prof`);
+      const passiveSenseRows = passiveSenses
+        .map(([sense, field, skill]) => {
+          const explicitValue = getField(fields, field);
+          if (explicitValue) return [sense, explicitValue];
+
+          const skillValue = getField(fields, skill);
+          const parsedSkillValue = skillValue.match(/^[+-]?\d+/)?.[0];
           return [
-            label,
-            getField(fields, valueName),
-            getField(fields, abilityName),
-            proficiency === 'E'
-              ? 'Expertise'
-              : proficiency === 'P'
-                ? 'Proficient'
-                : '',
+            sense,
+            parsedSkillValue ? String(10 + Number(parsedSkillValue)) : '',
           ];
-        }),
+        })
+        .filter((row) => row[1].trim());
+      if (sensesDescription || passiveSenseRows.length) {
+        addTextSection(
+          'Senses',
+          sensesDescription,
+          ['Passive sense', 'Value'],
+          passiveSenseRows,
+        );
+      }
+      const featureTraitSections = featureTraitFields
+        .map(([name, value]) => [
+          name.toLowerCase().replace(/[^a-z0-9]/g, ''),
+          value,
+        ] as const)
+        .filter(([name]) => name.includes('feature') && name.includes('trait'))
+        .flatMap(([, value]) => value.split('*').map((section) => section.trim()))
+        .filter(Boolean);
+      const featureGroups = {
+        action: [] as string[],
+        bonusAction: [] as string[],
+        reaction: [] as string[],
+        limitedResources: [] as string[],
+        others: [] as string[],
+      };
+      for (const feature of featureTraitSections) {
+        const isBonusAction = /\bbonus\s+action\b/i.test(feature);
+        const isAction = /\baction\b/i.test(feature) && !isBonusAction;
+        const isReaction = /\breaction\b/i.test(feature);
+        const isLimitedResource = /\b(?:short or long|short|long) rest\b/i.test(feature);
+
+        if (isBonusAction) {
+          featureGroups.bonusAction.push(feature);
+        } else if (isAction) {
+          featureGroups.action.push(feature);
+        }
+        if (isReaction) {
+          featureGroups.reaction.push(feature);
+        }
+        if (isLimitedResource) {
+          featureGroups.limitedResources.push(feature);
+        }
+        if (!isBonusAction && !isAction && !isReaction && !isLimitedResource) {
+          featureGroups.others.push(feature);
+        }
+      }
+      for (const [title, description] of [
+        ['Action', featureGroups.action.join('\n')],
+        ['Bonus Action', featureGroups.bonusAction.join('\n')],
+        ['Reaction', featureGroups.reaction.join('\n')],
+        ['Limited Resources', featureGroups.limitedResources.join('\n')],
+        ['Others', featureGroups.others.join('\n')],
+      ]) {
+        addTextSection(title, description);
+      }
+
+      const abilities: [string, string, string, [string, string][]][] = [
+        ['Strength', 'STR', 'STRmod', [['Athletics', 'Athletics']]],
+        [
+          'Dexterity',
+          'DEX',
+          'DEXmod',
+          [
+            ['Acrobatics', 'Acrobatics'],
+            ['Sleight of Hand', 'SleightofHand'],
+            ['Stealth', 'Stealth'],
+          ],
+        ],
+        ['Constitution', 'CON', 'CONmod', []],
+        [
+          'Intelligence',
+          'INT',
+          'INTmod',
+          [
+            ['Arcana', 'Arcana'],
+            ['History', 'History'],
+            ['Investigation', 'Investigation'],
+            ['Nature', 'Nature'],
+            ['Religion', 'Religion'],
+          ],
+        ],
+        [
+          'Wisdom',
+          'WIS',
+          'WISmod',
+          [
+            ['Animal Handling', 'Animal'],
+            ['Insight', 'Insight'],
+            ['Medicine', 'Medicine'],
+            ['Perception', 'Perception'],
+            ['Survival', 'Survival'],
+          ],
+        ],
+        [
+          'Charisma',
+          'CHA',
+          'CHamod',
+          [
+            ['Deception', 'Deception'],
+            ['Intimidation', 'Intimidation'],
+            ['Performance', 'Performance'],
+            ['Persuasion', 'Persuasion'],
+          ],
+        ],
+      ];
+      const abilitySkillRows: string[][] = [];
+      const abilitySkillRowSpans: number[][] = [];
+      for (const [name, score, modifier, skills] of abilities) {
+        const abilitySkills = skills.length ? skills : [['', '']];
+        abilitySkills.forEach(([label, field], skillIndex) => {
+          const proficiency = getField(fields, `${field}Prof`);
+          const abilityModifierText = getField(fields, modifier);
+          const abilityValue = [
+            abilityModifierText,
+            getField(fields, score),
+          ]
+            .filter(Boolean)
+            .join(' / ');
+          abilitySkillRows.push([
+            `${name} (${score})`,
+            abilityValue,
+            label,
+            proficiency === 'E'
+              ? '✓✓'
+              : proficiency === 'P'
+                ? '✓'
+                : '',
+            field ? getField(fields, field, `${field}Mod`) : '',
+          ]);
+          abilitySkillRowSpans.push(
+            skillIndex === 0
+              ? [abilitySkills.length, abilitySkills.length, 1, 1, 1]
+              : [0, 0, 1, 1, 1],
+          );
+        });
+      }
+      tables.push({
+        title: 'Ability scores and skills',
+        columns: ['Ability', 'Modifier / score', 'Skill', 'Proficiency', 'Skill value'],
+        rows: abilitySkillRows,
+        rowSpans: abilitySkillRowSpans,
+      });
+
+      const attunedItems = indexedRows(
+        20,
+        (index) => getField(fields, `Attuned Name${index + 1}`),
+        (index) => [
+          getField(fields, `Attuned Qty${index + 1}`),
+          getField(fields, `Attuned Weight${index + 1}`),
+        ],
       );
-
-      const attacks: string[][] = [];
-      for (let index = 1; index <= 20; index += 1) {
-        const name = getField(fields, index === 1 ? 'Wpn Name' : `Wpn Name ${index}`);
-        if (!name) continue;
-        attacks.push([
-          name,
-          getField(fields, `Wpn${index} AtkBonus`),
-          getField(fields, `Wpn${index} Damage`),
-          getField(fields, `Wpn Notes ${index}`),
-        ]);
-      }
-      addTable('Attacks', ['Name', 'Attack bonus', 'Damage', 'Notes'], attacks);
-
-      const equipment: string[][] = [];
-      for (let index = 0; index < 100; index += 1) {
-        const name = getField(fields, `Eq Name${index}`);
-        if (!name) continue;
-        equipment.push([
-          name,
-          getField(fields, `Eq Qty${index}`),
-          getField(fields, `Eq Weight${index}`),
-        ]);
-      }
-      addTable('Inventory', ['Item', 'Quantity', 'Weight'], equipment);
-
-      const currencies = ['CP', 'SP', 'EP', 'GP', 'PP'].map((name) => [
-        name,
-        getField(fields, name),
-      ]);
-      addTable('Currency', ['Coin', 'Amount'], currencies);
-
-      const attunedItems: string[][] = [];
-      for (let index = 1; index <= 20; index += 1) {
-        const name = getField(fields, `Attuned Name${index}`);
-        if (!name) continue;
-        attunedItems.push([
-          name,
-          getField(fields, `Attuned Qty${index}`),
-          getField(fields, `Attuned Weight${index}`),
-        ]);
-      }
       addTable('Attuned items', ['Item', 'Quantity', 'Weight'], attunedItems);
 
-      const spells: string[][] = [];
-      for (let index = 0; index < 200; index += 1) {
-        const name = getField(fields, `spellName${index}`);
-        if (!name) continue;
-        spells.push([
-          name,
+      const spells = indexedRows(
+        200,
+        (index) => getField(fields, `spellName${index}`),
+        (index) => [
           getField(fields, `spellSource${index}`),
           getField(fields, `spellCastingTime${index}`),
           getField(fields, `spellRange${index}`),
@@ -236,8 +352,8 @@ import '../styles/pdf-upload.css';
           getField(fields, `spellPrepared${index}`),
           getField(fields, `spellPage${index}`),
           getField(fields, `spellNotes${index}`),
-        ]);
-      }
+        ],
+      );
       addTable(
         'Spells',
         [
@@ -267,30 +383,51 @@ import '../styles/pdf-upload.css';
 
         const heading = document.createElement('h3');
         heading.textContent = tableData.title;
+        section.append(heading);
 
-        const scrollContainer = document.createElement('div');
-        scrollContainer.className = 'pdf-preview__table-scroll';
-
-        const table = document.createElement('table');
-        const head = table.createTHead().insertRow();
-        for (const column of tableData.columns) {
-          const cell = document.createElement('th');
-          cell.scope = 'col';
-          cell.textContent = column;
-          head.append(cell);
+        if (tableData.description) {
+          const description = document.createElement('p');
+          description.className = 'pdf-preview__table-description';
+          description.textContent = tableData.description;
+          section.append(description);
         }
 
-        const body = table.createTBody();
-        for (const rowData of tableData.rows) {
-          const row = body.insertRow();
-          for (const value of rowData) {
-            const cell = row.insertCell();
-            cell.textContent = value;
+        if (tableData.rows.length) {
+          const scrollContainer = document.createElement('div');
+          scrollContainer.className = 'pdf-preview__table-scroll';
+
+          const table = document.createElement('table');
+          const head = table.createTHead().insertRow();
+          for (const column of tableData.columns) {
+            const cell = document.createElement('th');
+            cell.scope = 'col';
+            cell.textContent = column;
+            head.append(cell);
           }
-        }
 
-        scrollContainer.append(table);
-        section.append(heading, scrollContainer);
+          const body = table.createTBody();
+          tableData.rows.forEach((rowData, rowIndex) => {
+            const row = body.insertRow();
+            rowData.forEach((value, columnIndex) => {
+              const rowSpan = tableData.rowSpans?.[rowIndex]?.[columnIndex] ?? 1;
+              if (rowSpan === 0) return;
+              const cell = row.insertCell();
+              cell.textContent = value;
+              if (rowSpan > 1) cell.rowSpan = rowSpan;
+              if (tableData.columns[columnIndex] === 'Proficiency' && value) {
+                cell.className = 'pdf-preview__proficiency';
+                cell.setAttribute(
+                  'aria-label',
+                  value === '✓✓' ? 'Expertise' : 'Proficient',
+                );
+                cell.title = value === '✓✓' ? 'Expertise' : 'Proficient';
+              }
+            });
+          });
+
+          scrollContainer.append(table);
+          section.append(scrollContainer);
+        }
         previewTables.append(section);
       }
     };
@@ -314,6 +451,8 @@ import '../styles/pdf-upload.css';
         loadingTask = pdfjsLib.getDocument({ data });
         const pdf = await loadingTask.promise;
         const fields = new Map<string, string>();
+        const featureTraitFields: [string, string][] = [];
+        const seenFeatureTraitValues = new Set<string>();
         for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
           const page = await pdf.getPage(pageNumber);
           const annotations = await page.getAnnotations();
@@ -327,12 +466,26 @@ import '../styles/pdf-upload.css';
             ) {
               const name = normalizeFieldName(annotation.fieldName);
               if (!fields.has(name)) fields.set(name, annotation.fieldValue.trim());
+              const normalizedFeatureName = annotation.fieldName
+                .toLowerCase()
+                .replace(/[^a-z0-9]/g, '');
+              if (
+                normalizedFeatureName.includes('feature') &&
+                normalizedFeatureName.includes('trait')
+              ) {
+                const value = annotation.fieldValue.trim();
+                const key = `${normalizedFeatureName}\u0000${value}`;
+                if (!seenFeatureTraitValues.has(key)) {
+                  seenFeatureTraitValues.add(key);
+                  featureTraitFields.push([annotation.fieldName, value]);
+                }
+              }
             }
           }
         }
 
         if (request === currentRequest) {
-          const tables = buildTables(fields);
+          const tables = buildTables(fields, featureTraitFields);
           if (!tables.length) {
             fileStatus.textContent =
               'No filled character-sheet fields were found. This extractor supports fillable PDFs, not flattened or scanned sheets.';

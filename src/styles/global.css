@@ -11,6 +11,17 @@ body {
     line-height: 1.5;
 }
 
+body:has(.pdf-upload) {
+    max-width: none;
+    min-height: 100vh;
+    min-height: 100dvh;
+    padding: 0;
+}
+
+body:has(.pdf-upload) footer {
+    display: none;
+}
+
 * {
     box-sizing: border-box;
 }
